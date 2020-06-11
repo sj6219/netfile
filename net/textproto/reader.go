@@ -61,6 +61,7 @@ func (r *Reader) readLineSlice() ([]byte, error) {
 		}
 		// Avoid the copy if the first call produced a full line.
 		if line == nil && !more {
+			fmt.Printf("<%s:\n", l)
 			return l, nil
 		}
 		line = append(line, l...)
@@ -68,6 +69,7 @@ func (r *Reader) readLineSlice() ([]byte, error) {
 			break
 		}
 	}
+	fmt.Printf("<%s:\n", line)
 	return line, nil
 }
 

@@ -81,6 +81,7 @@ package net
 import (
 	"context"
 	"errors"
+	"fmt"
 	"internal/poll"
 	"io"
 	"os"
@@ -182,6 +183,7 @@ func (c *conn) Read(b []byte) (int, error) {
 		return 0, syscall.EINVAL
 	}
 	n, err := c.fd.Read(b)
+	//fmt.Printf("<%s<\n", b[:n])
 	if err != nil && err != io.EOF {
 		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
 	}
@@ -193,6 +195,7 @@ func (c *conn) Write(b []byte) (int, error) {
 	if !c.ok() {
 		return 0, syscall.EINVAL
 	}
+	fmt.Printf(">%s>\n", b)
 	n, err := c.fd.Write(b)
 	if err != nil {
 		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
