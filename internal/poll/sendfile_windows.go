@@ -10,7 +10,7 @@ import (
 )
 
 // SendFile wraps the TransmitFile call.
-func SendFile(fd *FD, src syscall.Handle, n int64) (written int64, err error) {
+func SendFile(fd *FD, src syscall.HandleOp, n int64) (written int64, err error) {
 	if fd.kind == kindPipe {
 		// TransmitFile does not work with pipes
 		return 0, syscall.ESPIPE
@@ -25,19 +25,19 @@ func SendFile(fd *FD, src syscall.Handle, n int64) (written int64, err error) {
 	o.handle = src
 
 	// TODO(brainman): skip calling syscall.Seek if OS allows it
-	curpos, err := syscall.Seek(o.handle, 0, io.SeekCurrent)
+	curpos, err := o.handle.Seek_(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
 
 	if n <= 0 { // We don't know the size of the file so infer it.
 		// Find the number of bytes offset from curpos until the end of the file.
-		n, err = syscall.Seek(o.handle, -curpos, io.SeekEnd)
+		n, err = o.handle.Seek_( -curpos, io.SeekEnd)
 		if err != nil {
 			return
 		}
 		// Now seek back to the original position.
-		if _, err = syscall.Seek(o.handle, curpos, io.SeekStart); err != nil {
+		if _, err = o.handle.Seek_(curpos, io.SeekStart); err != nil {
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func SendFile(fd *FD, src syscall.Handle, n int64) (written int64, err error) {
 		o.o.OffsetHigh = uint32(curpos >> 32)
 
 		nw, err := wsrv.ExecIO(o, func(o *operation) error {
-			return syscall.TransmitFile(o.fd.Sysfd, o.handle, o.qty, 0, &o.o, nil, syscall.TF_WRITE_BEHIND)
+			return  o.handle.TransmitFile_(o.fd.Sysfd.GetDebugHandle(), o.qty, 0, &o.o, nil, syscall.TF_WRITE_BEHIND)
 		})
 		if err != nil {
 			return written, err
@@ -69,7 +69,7 @@ func SendFile(fd *FD, src syscall.Handle, n int64) (written int64, err error) {
 		// Some versions of Windows (Windows 10 1803) do not set
 		// file position after TransmitFile completes.
 		// So just use Seek to set file position.
-		if _, err = syscall.Seek(o.handle, curpos, io.SeekStart); err != nil {
+		if _, err = o.handle.Seek_(curpos, io.SeekStart); err != nil {
 			return written, err
 		}
 

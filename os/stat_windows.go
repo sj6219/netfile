@@ -34,7 +34,7 @@ func (file *File) Stat() (FileInfo, error) {
 		return &fileStat{name: basename(file.name), filetype: ft}, nil
 	}
 
-	fs, err := newFileStatFromGetFileInformationByHandle(file.name, file.pfd.Sysfd)
+	fs, err := newFileStatFromGetFileInformationByHandle(file.name, file.pfd.Sysfd.GetHandle())
 	if err != nil {
 		return nil, err
 	}
@@ -44,13 +44,14 @@ func (file *File) Stat() (FileInfo, error) {
 
 // stat implements both Stat and Lstat of a file.
 func stat(funcname, name string, createFileAttrs uint32) (FileInfo, error) {
+	netname := syscall.Decompose(name)
 	if len(name) == 0 {
 		return nil, &PathError{funcname, name, syscall.Errno(syscall.ERROR_PATH_NOT_FOUND)}
 	}
 	if isWindowsNulName(name) {
 		return &devNullStat, nil
 	}
-	namep, err := syscall.UTF16PtrFromString(fixLongPath(name))
+	namep, err := syscall.UTF16PtrFromString(fixLongPath(netname.String()))
 	if err != nil {
 		return nil, &PathError{funcname, name, err}
 	}
@@ -69,7 +70,7 @@ func stat(funcname, name string, createFileAttrs uint32) (FileInfo, error) {
 			FileSizeHigh:   fa.FileSizeHigh,
 			FileSizeLow:    fa.FileSizeLow,
 		}
-		if err := fs.saveInfoFromPath(name); err != nil {
+		if err := fs.saveInfoFromPath(netname.String()); err != nil {
 			return nil, err
 		}
 		return fs, nil
@@ -78,27 +79,52 @@ func stat(funcname, name string, createFileAttrs uint32) (FileInfo, error) {
 	// files, like c:\pagefile.sys. Use FindFirstFile for such files.
 	if err == windows.ERROR_SHARING_VIOLATION {
 		var fd syscall.Win32finddata
-		sh, err := syscall.FindFirstFile(namep, &fd)
+		err := syscall.FindFirstFile_Close(namep, &fd)
 		if err != nil {
 			return nil, &PathError{"FindFirstFile", name, err}
 		}
-		syscall.FindClose(sh)
 		fs := newFileStatFromWin32finddata(&fd)
-		if err := fs.saveInfoFromPath(name); err != nil {
+		if err := fs.saveInfoFromPath(netname.String()); err != nil {
 			return nil, err
 		}
 		return fs, nil
 	}
 
 	// Finally use CreateFile.
-	h, err := syscall.CreateFile(namep, 0, 0, nil,
-		syscall.OPEN_EXISTING, createFileAttrs, 0)
-	if err != nil {
-		return nil, &PathError{"CreateFile", name, err}
-	}
-	defer syscall.CloseHandle(h)
+	if netname.Server == "" {
+		h, err := syscall.CreateFile(namep, 0, 0, nil,
+			syscall.OPEN_EXISTING, createFileAttrs, 0)
+		if err != nil {
+			return nil, &PathError{"CreateFile", name, err}
+		}
+		defer syscall.CloseHandle(h)
 
-	return newFileStatFromGetFileInformationByHandle(name, h)
+		return newFileStatFromGetFileInformationByHandle(name, h)
+	} else {
+		var d syscall.ByHandleFileInformation
+		var reparseTag uint32
+
+		_, _, err := syscall.Syscall6(syscall.GetProc("_GetFileInformation"), 4, uintptr(unsafe.Pointer(namep)), uintptr(createFileAttrs), uintptr(unsafe.Pointer(&d)), uintptr(unsafe.Pointer(&reparseTag)), 0, 0)
+		if err != 0 {
+			return nil, &PathError{"_GetFileInformation", name, syscall.Errno(err)}
+		}
+		return &fileStat{
+			name:           basename(name),
+			FileAttributes: d.FileAttributes,
+			CreationTime:   d.CreationTime,
+			LastAccessTime: d.LastAccessTime,
+			LastWriteTime:  d.LastWriteTime,
+			FileSizeHigh:   d.FileSizeHigh,
+			FileSizeLow:    d.FileSizeLow,
+			vol:            d.VolumeSerialNumber,
+			idxhi:          d.FileIndexHigh,
+			idxlo:          d.FileIndexLow,
+			Reserved0:      reparseTag,
+			// fileStat.path is used by os.SameFile to decide if it needs
+			// to fetch vol, idxhi and idxlo. But these are already set,
+			// so set fileStat.path to "" to prevent os.SameFile doing it again.
+		}, nil
+	}
 }
 
 // statNolog implements Stat for Windows.

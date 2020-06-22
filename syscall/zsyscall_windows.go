@@ -293,7 +293,15 @@ func ExitProcess(exitcode uint32) {
 }
 
 func CreateFile(name *uint16, access uint32, mode uint32, sa *SecurityAttributes, createmode uint32, attrs uint32, templatefile int32) (handle Handle, err error) {
-	r0, _, e1 := Syscall9(procCreateFileW.Addr(), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(templatefile), 0, 0)
+	netname := DecomposeFromPtr(name)
+
+	var r0 uintptr
+	var e1 Errno
+	if netname.Server == "" {
+		r0, _, e1 = Syscall9(procCreateFileW.Addr(), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(templatefile), 0, 0)
+	} else {
+		r0, _, e1 = Syscall9(GetProc("_CreateFileW"), 7, uintptr(unsafe.Pointer(name)), uintptr(access), uintptr(mode), uintptr(unsafe.Pointer(sa)), uintptr(createmode), uintptr(attrs), uintptr(templatefile), 0, 0)
+	}
 	handle = Handle(r0)
 	if handle == InvalidHandle {
 		if e1 != 0 {
@@ -319,6 +327,10 @@ func ReadFile(handle Handle, buf []byte, done *uint32, overlapped *Overlapped) (
 		}
 	}
 	return
+}
+
+func (handle Handle) ReadFile_(buf []byte, done *uint32, overlapped *Overlapped) (err error) {
+	return ReadFile(handle, buf, done, overlapped)
 }
 
 func WriteFile(handle Handle, buf []byte, done *uint32, overlapped *Overlapped) (err error) {
@@ -362,6 +374,10 @@ func CloseHandle(handle Handle) (err error) {
 	return
 }
 
+func (handle Handle) CloseHandle_() (err error) {
+	return CloseHandle(handle)
+}
+
 func GetStdHandle(stdhandle int) (handle Handle, err error) {
 	r0, _, e1 := Syscall(procGetStdHandle.Addr(), 1, uintptr(stdhandle), 0, 0)
 	handle = Handle(r0)
@@ -376,7 +392,14 @@ func GetStdHandle(stdhandle int) (handle Handle, err error) {
 }
 
 func findFirstFile1(name *uint16, data *win32finddata1) (handle Handle, err error) {
-	r0, _, e1 := Syscall(procFindFirstFileW.Addr(), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
+	netname := DecomposeFromPtr(name)
+	var r0 uintptr
+	var e1 Errno
+	if netname.Server == "" {
+		r0, _, e1 = Syscall(procFindFirstFileW.Addr(), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
+	} else {
+		r0, _, e1 = Syscall(GetProc("_FindFirstFileW"), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
+	}
 	handle = Handle(r0)
 	if handle == InvalidHandle {
 		if e1 != 0 {
@@ -388,8 +411,53 @@ func findFirstFile1(name *uint16, data *win32finddata1) (handle Handle, err erro
 	return
 }
 
+func findFirstFile_close1(name *uint16, data *win32finddata1) (err error) {
+	netname := DecomposeFromPtr(name)
+	var r0 uintptr
+	var e1 Errno
+	if netname.Server == "" {
+		r0, _, e1 = Syscall(procFindFirstFileW.Addr(), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
+		handle := Handle(r0)
+		if handle == InvalidHandle {
+			if e1 != 0 {
+				err = errnoErr(e1)
+			} else {
+				err = EINVAL
+			}
+		}
+		CloseHandle(handle)
+	} else {
+		r0, _, e1 = Syscall(GetProc("_FindFirstFileW_Close"), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
+		if r0 == 0 {
+			if e1 != 0 {
+				err = errnoErr(e1)
+			} else {
+				err = EINVAL
+			}
+		}
+	}
+	return
+}
+
 func findNextFile1(handle Handle, data *win32finddata1) (err error) {
 	r1, _, e1 := Syscall(procFindNextFileW.Addr(), 2, uintptr(handle), uintptr(unsafe.Pointer(data)), 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = errnoErr(e1)
+		} else {
+			err = EINVAL
+		}
+	}
+	return
+}
+
+func findNextFile1_(host string, handle Handle, data *win32finddata1) (err error) {
+	serverp, err := UTF16PtrFromString(host)
+	if err != nil {
+		return 
+	}
+
+	r1, _, e1 := Syscall(GetProc("_FindNextFileW"), 3, uintptr(unsafe.Pointer(serverp)), uintptr(handle), uintptr(unsafe.Pointer(data)))
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)
@@ -410,6 +478,10 @@ func FindClose(handle Handle) (err error) {
 		}
 	}
 	return
+}
+
+func (handle Handle) FindClose_() (err error) {
+	return FindClose(handle)
 }
 
 func GetFileInformationByHandle(handle Handle, data *ByHandleFileInformation) (err error) {
@@ -590,6 +662,26 @@ func CancelIo(s Handle) (err error) {
 
 func CancelIoEx(s Handle, o *Overlapped) (err error) {
 	r1, _, e1 := Syscall(procCancelIoEx.Addr(), 2, uintptr(s), uintptr(unsafe.Pointer(o)), 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = errnoErr(e1)
+		} else {
+			err = EINVAL
+		}
+	}
+	return
+}
+
+func (s Handle) CancelIoEx_(o *Overlapped) (err error) {
+	return CancelIoEx(s, o)
+}
+
+func CancelIoEx_(host string, s Handle, o *Overlapped) (err error) {
+	serverp, err := UTF16PtrFromString(host)
+	if err != nil {
+		return 
+	}
+	r1, _, e1 := Syscall(GetProc("_CancelIoEx"), 3, uintptr(unsafe.Pointer(serverp)), uintptr(s), uintptr(unsafe.Pointer(o)))
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)
@@ -909,7 +1001,14 @@ func SetFileAttributes(name *uint16, attrs uint32) (err error) {
 }
 
 func GetFileAttributesEx(name *uint16, level uint32, info *byte) (err error) {
-	r1, _, e1 := Syscall(procGetFileAttributesExW.Addr(), 3, uintptr(unsafe.Pointer(name)), uintptr(level), uintptr(unsafe.Pointer(info)))
+	netname := DecomposeFromPtr(name)
+	var r1 uintptr
+	var e1 Errno
+	if netname.Server == "" {
+		r1, _, e1 = Syscall(procGetFileAttributesExW.Addr(), 3, uintptr(unsafe.Pointer(name)), uintptr(level), uintptr(unsafe.Pointer(info)))
+	} else {
+		r1, _, e1 = Syscall(GetProc("_GetFileAttributesEx"), 3, uintptr(unsafe.Pointer(name)), uintptr(level), uintptr(unsafe.Pointer(info)))
+	}
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)
@@ -1091,6 +1190,26 @@ func VirtualUnlock(addr uintptr, length uintptr) (err error) {
 
 func TransmitFile(s Handle, handle Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *Overlapped, transmitFileBuf *TransmitFileBuffers, flags uint32) (err error) {
 	r1, _, e1 := Syscall9(procTransmitFile.Addr(), 7, uintptr(s), uintptr(handle), uintptr(bytesToWrite), uintptr(bytsPerSend), uintptr(unsafe.Pointer(overlapped)), uintptr(unsafe.Pointer(transmitFileBuf)), uintptr(flags), 0, 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = errnoErr(e1)
+		} else {
+			err = EINVAL
+		}
+	}
+	return
+}
+
+func (handle Handle) TransmitFile_(s Handle,  bytesToWrite uint32, bytsPerSend uint32, overlapped *Overlapped, transmitFileBuf *TransmitFileBuffers, flags uint32) (err error) {
+	return TransmitFile(s, handle, bytesToWrite, bytsPerSend, overlapped, transmitFileBuf, flags)
+}
+
+func TransmitFile_(host string, s Handle, handle Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *Overlapped, transmitFileBuf *TransmitFileBuffers, flags uint32) (err error) {
+	serverp, err := UTF16PtrFromString(host)
+	if err != nil {
+		return err
+	}
+	r1, _, e1 := Syscall9(GetProc("_TransmitFile"), 8, uintptr(unsafe.Pointer(serverp)), uintptr(s), uintptr(handle), uintptr(bytesToWrite), uintptr(bytsPerSend), uintptr(unsafe.Pointer(overlapped)), uintptr(unsafe.Pointer(transmitFileBuf)), uintptr(flags), 0)
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)

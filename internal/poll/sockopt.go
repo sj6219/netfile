@@ -14,7 +14,7 @@ func (fd *FD) SetsockoptInt(level, name, arg int) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.SetsockoptInt(fd.Sysfd, level, name, arg)
+	return syscall.SetsockoptInt(fd.Sysfd.GetDebugHandle(), level, name, arg)
 }
 
 // SetsockoptInet4Addr wraps the setsockopt network call with an IPv4 address.
@@ -23,7 +23,7 @@ func (fd *FD) SetsockoptInet4Addr(level, name int, arg [4]byte) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.SetsockoptInet4Addr(fd.Sysfd, level, name, arg)
+	return syscall.SetsockoptInet4Addr(fd.Sysfd.GetDebugHandle(), level, name, arg)
 }
 
 // SetsockoptLinger wraps the setsockopt network call with a Linger argument.
@@ -32,5 +32,5 @@ func (fd *FD) SetsockoptLinger(level, name int, l *syscall.Linger) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.SetsockoptLinger(fd.Sysfd, level, name, l)
+	return syscall.SetsockoptLinger(fd.Sysfd.GetDebugHandle(), level, name, l)
 }

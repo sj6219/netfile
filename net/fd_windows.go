@@ -79,7 +79,7 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (syscall.
 		defer fd.pfd.SetWriteDeadline(noDeadline)
 	}
 	if !canUseConnectEx(fd.net) {
-		err := connectFunc(fd.pfd.Sysfd, ra)
+		err := connectFunc(fd.pfd.Sysfd.GetDebugHandle(), ra)
 		return nil, os.NewSyscallError("connect", err)
 	}
 	// ConnectEx windows API requires an unconnected, previously bound socket.
@@ -92,7 +92,7 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (syscall.
 		default:
 			panic("unexpected type in connect")
 		}
-		if err := syscall.Bind(fd.pfd.Sysfd, la); err != nil {
+		if err := syscall.Bind(fd.pfd.Sysfd.GetDebugHandle(), la); err != nil {
 			return nil, os.NewSyscallError("bind", err)
 		}
 	}
@@ -126,7 +126,8 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (syscall.
 		}
 	}
 	// Refresh socket properties.
-	return nil, os.NewSyscallError("setsockopt", syscall.Setsockopt(fd.pfd.Sysfd, syscall.SOL_SOCKET, syscall.SO_UPDATE_CONNECT_CONTEXT, (*byte)(unsafe.Pointer(&fd.pfd.Sysfd)), int32(unsafe.Sizeof(fd.pfd.Sysfd))))
+	h := fd.pfd.Sysfd.GetDebugHandle()
+	return nil, os.NewSyscallError("setsockopt", syscall.Setsockopt(fd.pfd.Sysfd.GetDebugHandle(), syscall.SOL_SOCKET, syscall.SO_UPDATE_CONNECT_CONTEXT, (*byte)(unsafe.Pointer(&h)), int32(unsafe.Sizeof(h))))
 }
 
 func (fd *netFD) Close() error {

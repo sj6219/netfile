@@ -26,7 +26,7 @@ func (fd *FD) Fchmod(mode uint32) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Fchmod(fd.Sysfd, mode)
+	return syscall.Fchmod(fd.Sysfd.GetDebugHandle(), mode)
 }
 
 // Fchown wraps syscall.Fchown.
@@ -35,7 +35,7 @@ func (fd *FD) Fchown(uid, gid int) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Fchown(fd.Sysfd, uid, gid)
+	return syscall.Fchown(fd.Sysfd.GetDebugHandle(), uid, gid)
 }
 
 // Ftruncate wraps syscall.Ftruncate.
@@ -44,5 +44,5 @@ func (fd *FD) Ftruncate(size int64) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Ftruncate(fd.Sysfd, size)
+	return syscall.Ftruncate(fd.Sysfd.GetDebugHandle(), size)
 }

@@ -96,7 +96,7 @@ type operation struct {
 	sa     syscall.Sockaddr
 	rsa    *syscall.RawSockaddrAny
 	rsan   int32
-	handle syscall.Handle
+	handle syscall.HandleOp
 	flags  uint32
 	bufs   []syscall.WSABuf
 }
@@ -177,7 +177,7 @@ func (s *ioSrv) ProcessRemoteIO() {
 		if r.submit != nil {
 			r.o.errc <- r.submit(r.o)
 		} else {
-			r.o.errc <- syscall.CancelIo(r.o.fd.Sysfd)
+			r.o.errc <- syscall.CancelIo(r.o.fd.Sysfd.GetDebugHandle())
 		}
 	}
 }
@@ -248,7 +248,7 @@ func (s *ioSrv) ExecIO(o *operation, submit func(o *operation) error) (int, erro
 	}
 	// Cancel our request.
 	if canCancelIO {
-		err := syscall.CancelIoEx(fd.Sysfd, &o.o)
+		err := syscall.CancelIoEx(fd.Sysfd.GetDebugHandle(), &o.o)
 		// Assuming ERROR_NOT_FOUND is returned, if IO is completed.
 		if err != nil && err != syscall.ERROR_NOT_FOUND {
 			// TODO(brainman): maybe do something else, but panic.
@@ -295,7 +295,8 @@ type FD struct {
 	fdmu fdMutex
 
 	// System file descriptor. Immutable until Close.
-	Sysfd syscall.Handle
+	Sysfd  syscall.HandleOp
+	Sysfd_ syscall.Handle
 
 	// Read operation.
 	rop operation
@@ -348,7 +349,7 @@ const (
 // logInitFD is set by tests to enable file descriptor initialization logging.
 var logInitFD func(net string, fd *FD, err error)
 
-// Init initializes the FD. The Sysfd field should already be set.
+// Init initializes the FD. The Sysfd.GetDebugHandle() field should already be set.
 // This can be called multiple times on a single FD.
 // The net argument is a network name from the net package (e.g., "tcp"),
 // or "file" or "console" or "dir".
@@ -406,7 +407,7 @@ func (fd *FD) Init(net string, pollable bool) (string, error) {
 		if net == "tcp" {
 			flags |= syscall.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS
 		}
-		err := syscall.SetFileCompletionNotificationModes(fd.Sysfd, flags)
+		err := syscall.SetFileCompletionNotificationModes(fd.Sysfd.GetDebugHandle(), flags)
 		if err == nil && flags&syscall.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS != 0 {
 			fd.skipSyncNotif = true
 		}
@@ -418,7 +419,7 @@ func (fd *FD) Init(net string, pollable bool) (string, error) {
 		ret := uint32(0)
 		flag := uint32(0)
 		size := uint32(unsafe.Sizeof(flag))
-		err := syscall.WSAIoctl(fd.Sysfd, syscall.SIO_UDP_CONNRESET, (*byte)(unsafe.Pointer(&flag)), size, nil, 0, &ret, nil, 0)
+		err := syscall.WSAIoctl(fd.Sysfd.GetDebugHandle(), syscall.SIO_UDP_CONNRESET, (*byte)(unsafe.Pointer(&flag)), size, nil, 0, &ret, nil, 0)
 		if err != nil {
 			return "wsaioctl", err
 		}
@@ -437,7 +438,7 @@ func (fd *FD) Init(net string, pollable bool) (string, error) {
 }
 
 func (fd *FD) destroy() error {
-	if fd.Sysfd == syscall.InvalidHandle {
+	if fd.Sysfd.GetHandle() == syscall.InvalidHandle {
 		return syscall.EINVAL
 	}
 	// Poller may want to unregister fd in readiness notification mechanism,
@@ -447,11 +448,11 @@ func (fd *FD) destroy() error {
 	switch fd.kind {
 	case kindNet:
 		// The net package uses the CloseFunc variable for testing.
-		err = CloseFunc(fd.Sysfd)
+		err = CloseFunc(fd.Sysfd.GetDebugHandle())
 	case kindDir:
-		err = syscall.FindClose(fd.Sysfd)
+		err = fd.Sysfd.FindClose_()
 	default:
-		err = syscall.CloseHandle(fd.Sysfd)
+		err = fd.Sysfd.CloseHandle_()
 	}
 	fd.Sysfd = syscall.InvalidHandle
 	runtime_Semrelease(&fd.csema)
@@ -465,7 +466,7 @@ func (fd *FD) Close() error {
 		return errClosing(fd.isFile)
 	}
 	if fd.kind == kindPipe {
-		syscall.CancelIoEx(fd.Sysfd, nil)
+		fd.Sysfd.CancelIoEx_(nil)
 	}
 	// unblock pending reader and writer
 	fd.pd.evict()
@@ -482,7 +483,7 @@ func (fd *FD) Shutdown(how int) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Shutdown(fd.Sysfd, how)
+	return syscall.Shutdown(fd.Sysfd.GetDebugHandle(), how)
 }
 
 // Windows ReadFile and WSARecv use DWORD (uint32) parameter to pass buffer length.
@@ -525,7 +526,7 @@ func (fd *FD) Read(buf []byte) (int, error) {
 		o := &fd.rop
 		o.InitBuf(buf)
 		n, err = rsrv.ExecIO(o, func(o *operation) error {
-			return syscall.WSARecv(o.fd.Sysfd, &o.buf, 1, &o.qty, &o.flags, &o.o, nil)
+			return syscall.WSARecv(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, &o.flags, &o.o, nil)
 		})
 		if race.Enabled {
 			race.Acquire(unsafe.Pointer(&ioSync))
@@ -561,7 +562,7 @@ func (fd *FD) readConsole(b []byte) (int, error) {
 			n = len(b)
 		}
 		var nw uint32
-		err := ReadConsole(fd.Sysfd, &fd.readuint16[:len(fd.readuint16)+1][len(fd.readuint16)], uint32(n), &nw, nil)
+		err := ReadConsole(fd.Sysfd.GetDebugHandle(), &fd.readuint16[:len(fd.readuint16)+1][len(fd.readuint16)], uint32(n), &nw, nil)
 		if err != nil {
 			return 0, err
 		}
@@ -627,17 +628,17 @@ func (fd *FD) Pread(b []byte, off int64) (int, error) {
 
 	fd.l.Lock()
 	defer fd.l.Unlock()
-	curoffset, e := syscall.Seek(fd.Sysfd, 0, io.SeekCurrent)
+	curoffset, e := syscall.Seek(fd.Sysfd.GetDebugHandle(), 0, io.SeekCurrent)
 	if e != nil {
 		return 0, e
 	}
-	defer syscall.Seek(fd.Sysfd, curoffset, io.SeekStart)
+	defer syscall.Seek(fd.Sysfd.GetDebugHandle(), curoffset, io.SeekStart)
 	o := syscall.Overlapped{
 		OffsetHigh: uint32(off >> 32),
 		Offset:     uint32(off),
 	}
 	var done uint32
-	e = syscall.ReadFile(fd.Sysfd, b, &done, &o)
+	e = syscall.ReadFile(fd.Sysfd.GetDebugHandle(), b, &done, &o)
 	if e != nil {
 		done = 0
 		if e == syscall.ERROR_HANDLE_EOF {
@@ -669,7 +670,7 @@ func (fd *FD) ReadFrom(buf []byte) (int, syscall.Sockaddr, error) {
 			o.rsa = new(syscall.RawSockaddrAny)
 		}
 		o.rsan = int32(unsafe.Sizeof(*o.rsa))
-		return syscall.WSARecvFrom(o.fd.Sysfd, &o.buf, 1, &o.qty, &o.flags, o.rsa, &o.rsan, &o.o, nil)
+		return syscall.WSARecvFrom(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, &o.flags, o.rsa, &o.rsan, &o.o, nil)
 	})
 	err = fd.eofError(n, err)
 	if err != nil {
@@ -703,7 +704,7 @@ func (fd *FD) Write(buf []byte) (int, error) {
 			case kindConsole:
 				n, err = fd.writeConsole(b)
 			default:
-				n, err = syscall.Write(fd.Sysfd, b)
+				n, err = syscall.Write(fd.Sysfd.GetDebugHandle(), b)
 				if fd.kind == kindPipe && err == syscall.ERROR_OPERATION_ABORTED {
 					// Close uses CancelIoEx to interrupt concurrent I/O for pipes.
 					// If the fd is a pipe and the Write was interrupted by CancelIoEx,
@@ -721,7 +722,7 @@ func (fd *FD) Write(buf []byte) (int, error) {
 			o := &fd.wop
 			o.InitBuf(b)
 			n, err = wsrv.ExecIO(o, func(o *operation) error {
-				return syscall.WSASend(o.fd.Sysfd, &o.buf, 1, &o.qty, 0, &o.o, nil)
+				return syscall.WSASend(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, 0, &o.o, nil)
 			})
 		}
 		ntotal += n
@@ -766,7 +767,7 @@ func (fd *FD) writeConsole(b []byte) (int, error) {
 		uint16s := utf16.Encode(chunk)
 		for len(uint16s) > 0 {
 			var written uint32
-			err := syscall.WriteConsole(fd.Sysfd, &uint16s[0], uint32(len(uint16s)), &written, nil)
+			err := syscall.WriteConsole(fd.Sysfd.GetDebugHandle(), &uint16s[0], uint32(len(uint16s)), &written, nil)
 			if err != nil {
 				return 0, err
 			}
@@ -787,11 +788,11 @@ func (fd *FD) Pwrite(buf []byte, off int64) (int, error) {
 
 	fd.l.Lock()
 	defer fd.l.Unlock()
-	curoffset, e := syscall.Seek(fd.Sysfd, 0, io.SeekCurrent)
+	curoffset, e := syscall.Seek(fd.Sysfd.GetDebugHandle(), 0, io.SeekCurrent)
 	if e != nil {
 		return 0, e
 	}
-	defer syscall.Seek(fd.Sysfd, curoffset, io.SeekStart)
+	defer syscall.Seek(fd.Sysfd.GetDebugHandle(), curoffset, io.SeekStart)
 
 	ntotal := 0
 	for len(buf) > 0 {
@@ -804,7 +805,7 @@ func (fd *FD) Pwrite(buf []byte, off int64) (int, error) {
 			OffsetHigh: uint32(off >> 32),
 			Offset:     uint32(off),
 		}
-		e = syscall.WriteFile(fd.Sysfd, b, &n, &o)
+		e = syscall.WriteFile(fd.Sysfd.GetDebugHandle(), b, &n, &o)
 		ntotal += int(n)
 		if e != nil {
 			return ntotal, e
@@ -830,7 +831,7 @@ func (fd *FD) Writev(buf *[][]byte) (int64, error) {
 	o := &fd.wop
 	o.InitBufs(buf)
 	n, err := wsrv.ExecIO(o, func(o *operation) error {
-		return syscall.WSASend(o.fd.Sysfd, &o.bufs[0], uint32(len(o.bufs)), &o.qty, 0, &o.o, nil)
+		return syscall.WSASend(o.fd.Sysfd.GetDebugHandle(), &o.bufs[0], uint32(len(o.bufs)), &o.qty, 0, &o.o, nil)
 	})
 	o.ClearBufs()
 	TestHookDidWritev(n)
@@ -851,7 +852,7 @@ func (fd *FD) WriteTo(buf []byte, sa syscall.Sockaddr) (int, error) {
 		o.InitBuf(buf)
 		o.sa = sa
 		n, err := wsrv.ExecIO(o, func(o *operation) error {
-			return syscall.WSASendto(o.fd.Sysfd, &o.buf, 1, &o.qty, 0, o.sa, &o.o, nil)
+			return syscall.WSASendto(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, 0, o.sa, &o.o, nil)
 		})
 		return n, err
 	}
@@ -866,7 +867,7 @@ func (fd *FD) WriteTo(buf []byte, sa syscall.Sockaddr) (int, error) {
 		o.InitBuf(b)
 		o.sa = sa
 		n, err := wsrv.ExecIO(o, func(o *operation) error {
-			return syscall.WSASendto(o.fd.Sysfd, &o.buf, 1, &o.qty, 0, o.sa, &o.o, nil)
+			return syscall.WSASendto(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, 0, o.sa, &o.o, nil)
 		})
 		ntotal += int(n)
 		if err != nil {
@@ -884,7 +885,7 @@ func (fd *FD) ConnectEx(ra syscall.Sockaddr) error {
 	o := &fd.wop
 	o.sa = ra
 	_, err := wsrv.ExecIO(o, func(o *operation) error {
-		return ConnectExFunc(o.fd.Sysfd, o.sa, nil, 0, nil, &o.o)
+		return ConnectExFunc(o.fd.Sysfd.GetDebugHandle(), o.sa, nil, 0, nil, &o.o)
 	})
 	return err
 }
@@ -894,7 +895,7 @@ func (fd *FD) acceptOne(s syscall.Handle, rawsa []syscall.RawSockaddrAny, o *ope
 	o.handle = s
 	o.rsan = int32(unsafe.Sizeof(rawsa[0]))
 	_, err := rsrv.ExecIO(o, func(o *operation) error {
-		return AcceptFunc(o.fd.Sysfd, o.handle, (*byte)(unsafe.Pointer(&rawsa[0])), 0, uint32(o.rsan), uint32(o.rsan), &o.qty, &o.o)
+		return AcceptFunc(o.fd.Sysfd.GetDebugHandle(), o.handle.GetDebugHandle(), (*byte)(unsafe.Pointer(&rawsa[0])), 0, uint32(o.rsan), uint32(o.rsan), &o.qty, &o.o)
 	})
 	if err != nil {
 		CloseFunc(s)
@@ -902,12 +903,13 @@ func (fd *FD) acceptOne(s syscall.Handle, rawsa []syscall.RawSockaddrAny, o *ope
 	}
 
 	// Inherit properties of the listening socket.
-	err = syscall.Setsockopt(s, syscall.SOL_SOCKET, syscall.SO_UPDATE_ACCEPT_CONTEXT, (*byte)(unsafe.Pointer(&fd.Sysfd)), int32(unsafe.Sizeof(fd.Sysfd)))
+	var h syscall.Handle = fd.Sysfd.GetDebugHandle()
+	err = syscall.Setsockopt(s, syscall.SOL_SOCKET, syscall.SO_UPDATE_ACCEPT_CONTEXT, (*byte)(unsafe.Pointer(&h)), int32(unsafe.Sizeof(h)))
 	if err != nil {
 		CloseFunc(s)
 		return "setsockopt", err
 	}
-
+	//fd.Sysfd.SetDebugHandle(h);
 	return "", nil
 }
 
@@ -959,8 +961,7 @@ func (fd *FD) Seek(offset int64, whence int) (int64, error) {
 
 	fd.l.Lock()
 	defer fd.l.Unlock()
-
-	return syscall.Seek(fd.Sysfd, offset, whence)
+	return fd.Sysfd.Seek_(offset, whence)
 }
 
 // FindNextFile wraps syscall.FindNextFile.
@@ -969,7 +970,7 @@ func (fd *FD) FindNextFile(data *syscall.Win32finddata) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.FindNextFile(fd.Sysfd, data)
+	return fd.Sysfd.FindNextFile(data)
 }
 
 // Fchdir wraps syscall.Fchdir.
@@ -978,7 +979,7 @@ func (fd *FD) Fchdir() error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Fchdir(fd.Sysfd)
+	return syscall.Fchdir(fd.Sysfd.GetDebugHandle())
 }
 
 // GetFileType wraps syscall.GetFileType.
@@ -987,7 +988,7 @@ func (fd *FD) GetFileType() (uint32, error) {
 		return 0, err
 	}
 	defer fd.decref()
-	return syscall.GetFileType(fd.Sysfd)
+	return fd.Sysfd.GetFileType() // syscall.GetFileType(fd.Sysfd.GetDebugHandle())
 }
 
 // GetFileInformationByHandle wraps GetFileInformationByHandle.
@@ -996,7 +997,7 @@ func (fd *FD) GetFileInformationByHandle(data *syscall.ByHandleFileInformation) 
 		return err
 	}
 	defer fd.decref()
-	return syscall.GetFileInformationByHandle(fd.Sysfd, data)
+	return syscall.GetFileInformationByHandle(fd.Sysfd.GetDebugHandle(), data)
 }
 
 // RawControl invokes the user-defined function f for a non-IO
@@ -1006,7 +1007,7 @@ func (fd *FD) RawControl(f func(uintptr)) error {
 		return err
 	}
 	defer fd.decref()
-	f(uintptr(fd.Sysfd))
+	f(uintptr(fd.Sysfd.GetDebugHandle()))
 	return nil
 }
 
@@ -1017,7 +1018,7 @@ func (fd *FD) RawRead(f func(uintptr) bool) error {
 	}
 	defer fd.readUnlock()
 	for {
-		if f(uintptr(fd.Sysfd)) {
+		if f(uintptr(fd.Sysfd.GetDebugHandle())) {
 			return nil
 		}
 
@@ -1029,7 +1030,7 @@ func (fd *FD) RawRead(f func(uintptr) bool) error {
 			o.flags |= windows.MSG_PEEK
 		}
 		_, err := rsrv.ExecIO(o, func(o *operation) error {
-			return syscall.WSARecv(o.fd.Sysfd, &o.buf, 1, &o.qty, &o.flags, &o.o, nil)
+			return syscall.WSARecv(o.fd.Sysfd.GetDebugHandle(), &o.buf, 1, &o.qty, &o.flags, &o.o, nil)
 		})
 		if err == windows.WSAEMSGSIZE {
 			// expected with a 0-byte peek, ignore.
@@ -1046,7 +1047,7 @@ func (fd *FD) RawWrite(f func(uintptr) bool) error {
 	}
 	defer fd.writeUnlock()
 
-	if f(uintptr(fd.Sysfd)) {
+	if f(uintptr(fd.Sysfd.GetDebugHandle())) {
 		return nil
 	}
 
@@ -1099,7 +1100,7 @@ func (fd *FD) ReadMsg(p []byte, oob []byte) (int, int, int, syscall.Sockaddr, er
 	o.msg.Name = o.rsa
 	o.msg.Namelen = int32(unsafe.Sizeof(*o.rsa))
 	n, err := rsrv.ExecIO(o, func(o *operation) error {
-		return windows.WSARecvMsg(o.fd.Sysfd, &o.msg, &o.qty, &o.o, nil)
+		return windows.WSARecvMsg(o.fd.Sysfd.GetDebugHandle(), &o.msg, &o.qty, &o.o, nil)
 	})
 	err = fd.eofError(n, err)
 	var sa syscall.Sockaddr
@@ -1131,7 +1132,7 @@ func (fd *FD) WriteMsg(p []byte, oob []byte, sa syscall.Sockaddr) (int, int, err
 		o.msg.Namelen = len
 	}
 	n, err := wsrv.ExecIO(o, func(o *operation) error {
-		return windows.WSASendMsg(o.fd.Sysfd, &o.msg, 0, &o.qty, &o.o, nil)
+		return windows.WSASendMsg(o.fd.Sysfd.GetDebugHandle(), &o.msg, 0, &o.qty, &o.o, nil)
 	})
 	return n, int(o.msg.Control.Len), err
 }

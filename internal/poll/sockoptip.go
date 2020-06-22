@@ -14,7 +14,7 @@ func (fd *FD) SetsockoptIPMreq(level, name int, mreq *syscall.IPMreq) error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.SetsockoptIPMreq(fd.Sysfd, level, name, mreq)
+	return syscall.SetsockoptIPMreq(fd.Sysfd.GetDebugHandle(), level, name, mreq)
 }
 
 // SetsockoptIPv6Mreq wraps the setsockopt network call with an IPv6Mreq argument.
@@ -23,5 +23,5 @@ func (fd *FD) SetsockoptIPv6Mreq(level, name int, mreq *syscall.IPv6Mreq) error 
 		return err
 	}
 	defer fd.decref()
-	return syscall.SetsockoptIPv6Mreq(fd.Sysfd, level, name, mreq)
+	return syscall.SetsockoptIPv6Mreq(fd.Sysfd.GetDebugHandle(), level, name, mreq)
 }

@@ -7,6 +7,7 @@ package os
 import (
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 // Getpagesize returns the underlying system's memory page size.
@@ -15,6 +16,96 @@ func Getpagesize() int { return syscall.Getpagesize() }
 // File represents an open file descriptor.
 type File struct {
 	*file // os specific
+}
+
+// HandleOp
+
+func (f *File) GetHandle() syscall.Handle {
+	return f.pfd.Sysfd_
+}
+
+func (f *File) GetDebugHandle() syscall.Handle {
+	syscall.Debug()
+	return f.pfd.Sysfd_
+}
+
+func (f *File) GetFileType() (n uint32, err error) {
+	netname := syscall.Decompose(f.name)
+	serverp, err := syscall.UTF16PtrFromString(netname.Server)
+	if err != nil {
+		return syscall.FILE_TYPE_UNKNOWN, err
+	}
+	r0, _, e1 := syscall.Syscall(syscall.GetProc("_GetFileType"), 2, uintptr(unsafe.Pointer(serverp)), uintptr(f.GetHandle()), 0)
+	n = uint32(r0)
+	if n == 0 {
+		if e1 != 0 {
+			err = syscall.Errno(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func (file *File) ReadFile_(buf []byte, done *uint32, overlapped *syscall.Overlapped) (err error) {
+	syscall.Debug()
+	return syscall.ReadFile(file.GetHandle(), buf, done, overlapped)
+}
+
+func (file *File) CloseHandle_() (err error) {
+	var serverp *uint16
+	netname := syscall.Decompose(file.name)
+	serverp, err = syscall.UTF16PtrFromString(netname.Server)
+	if err != nil {
+		return
+	}
+	r1, _, e1 := syscall.Syscall(syscall.GetProc("_CloseHandle"), 2, uintptr(unsafe.Pointer(serverp)), uintptr(file.GetHandle()), 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = syscall.Errno(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func (file *File) FindClose_() (err error) {
+	var serverp *uint16
+	netname := syscall.Decompose(file.name)
+	serverp, err = syscall.UTF16PtrFromString(netname.Server)
+	if err != nil {
+		return
+	}
+	r1, _, e1 := syscall.Syscall(syscall.GetProc("_FindClose"), 2, uintptr(unsafe.Pointer(serverp)), uintptr(file.GetHandle()), 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = syscall.Errno(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func (file *File) FindNextFile(data *syscall.Win32finddata) (err error) {
+	netname := syscall.Decompose(file.name)
+	return syscall.FindNextFile_(netname.Server, file.GetHandle(), data)
+}
+
+func (file *File) 	Seek_(offset int64, whence int) (newoffset int64, err error) {
+	netname := syscall.Decompose(file.name)
+	return syscall.Seek_(netname.Server, file.GetHandle(), offset, whence)
+}
+
+func (file *File) 	TransmitFile_(s syscall.Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *syscall.Overlapped, transmitFileBuf *syscall.TransmitFileBuffers, flags uint32) (err error) {
+	netname := syscall.Decompose(file.name)
+	return syscall.TransmitFile_(netname.Server,  s , file.GetHandle(), bytesToWrite, bytsPerSend, overlapped, transmitFileBuf, flags)
+}
+
+func (file *File) 	CancelIoEx_(o *syscall.Overlapped) (err error) {
+	netname := syscall.Decompose(file.name)
+	return syscall.CancelIoEx_(netname.Server,  file.GetHandle(), o)
 }
 
 // A FileInfo describes a file and is returned by Stat and Lstat.

@@ -36,7 +36,7 @@ var serverInit sync.Once
 
 func (pd *pollDesc) init(fd *FD) error {
 	serverInit.Do(runtime_pollServerInit)
-	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))
+	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd.GetDebugHandle()))
 	if errno != 0 {
 		if ctx != 0 {
 			runtime_pollUnblock(ctx)

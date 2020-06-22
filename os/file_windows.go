@@ -32,7 +32,14 @@ func (file *File) Fd() uintptr {
 	if file == nil {
 		return uintptr(syscall.InvalidHandle)
 	}
-	return uintptr(file.pfd.Sysfd)
+	return uintptr(file.pfd.Sysfd.GetDebugHandle())
+}
+
+func (file *File) FdOp() syscall.HandleOp {
+	if file == nil {
+		return (syscall.InvalidHandle)
+	}
+	return (file.pfd.Sysfd)
 }
 
 // newFile returns a new File with the given file handle and name.
@@ -48,14 +55,29 @@ func newFile(h syscall.Handle, name string, kind string) *File {
 		}
 	}
 
-	f := &File{&file{
-		pfd: poll.FD{
-			Sysfd:         h,
-			IsStream:      true,
-			ZeroReadIsEOF: true,
-		},
-		name: name,
-	}}
+	netname := syscall.Decompose(name)
+	var f *File
+	if netname.Server           == ""{
+		f = &File{&file{
+			pfd: poll.FD{
+				Sysfd:         h,
+				IsStream:      true,
+				ZeroReadIsEOF: true,
+			},
+			name: name,
+		}}
+
+	} else {
+		f = &File{&file{
+			pfd: poll.FD{
+				Sysfd_:                  h,
+				IsStream:      true,
+				ZeroReadIsEOF: true,
+			},
+			name: name,
+		}}
+		f.pfd.Sysfd = f
+	}
 	runtime.SetFinalizer(f.file, (*file).close)
 
 	// Ignore initialization errors.
@@ -99,7 +121,8 @@ const DevNull = "NUL"
 func (f *file) isdir() bool { return f != nil && f.dirinfo != nil }
 
 func openFile(name string, flag int, perm FileMode) (file *File, err error) {
-	r, e := syscall.Open(fixLongPath(name), flag|syscall.O_CLOEXEC, syscallMode(perm))
+	netname := syscall.Decompose(name)
+	r, e := syscall.Open(fixLongPath(netname.String()), flag|syscall.O_CLOEXEC, syscallMode(perm))
 	if e != nil {
 		return nil, e
 	}
@@ -107,9 +130,10 @@ func openFile(name string, flag int, perm FileMode) (file *File, err error) {
 }
 
 func openDir(name string) (file *File, err error) {
+	netname := syscall.Decompose(name)
 	var mask string
 
-	path := fixLongPath(name)
+	path := fixLongPath(netname.String())
 
 	if len(path) == 2 && path[1] == ':' { // it is a drive letter, like C:
 		mask = path + `*`

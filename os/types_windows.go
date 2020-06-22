@@ -42,26 +42,37 @@ type fileStat struct {
 // newFileStatFromGetFileInformationByHandle calls GetFileInformationByHandle
 // to gather all required information about the file handle h.
 func newFileStatFromGetFileInformationByHandle(path string, h syscall.Handle) (fs *fileStat, err error) {
+	netname := syscall.Decompose(path)
 	var d syscall.ByHandleFileInformation
-	err = syscall.GetFileInformationByHandle(h, &d)
-	if err != nil {
-		return nil, &PathError{"GetFileInformationByHandle", path, err}
-	}
-
 	var ti windows.FILE_ATTRIBUTE_TAG_INFO
-	err = windows.GetFileInformationByHandleEx(h, windows.FileAttributeTagInfo, (*byte)(unsafe.Pointer(&ti)), uint32(unsafe.Sizeof(ti)))
-	if err != nil {
-		if errno, ok := err.(syscall.Errno); ok && errno == windows.ERROR_INVALID_PARAMETER {
-			// It appears calling GetFileInformationByHandleEx with
-			// FILE_ATTRIBUTE_TAG_INFO fails on FAT file system with
-			// ERROR_INVALID_PARAMETER. Clear ti.ReparseTag in that
-			// instance to indicate no symlinks are possible.
-			ti.ReparseTag = 0
-		} else {
-			return nil, &PathError{"GetFileInformationByHandleEx", path, err}
+	if (netname.Server == "") {
+//		var d syscall.ByHandleFileInformation
+		err = syscall.GetFileInformationByHandle(h, &d)
+		if err != nil {
+			return nil, &PathError{"GetFileInformationByHandle", path, err}
 		}
-	}
+	
+//		var ti windows.FILE_ATTRIBUTE_TAG_INFO
+		err = windows.GetFileInformationByHandleEx(h, windows.FileAttributeTagInfo, (*byte)(unsafe.Pointer(&ti)), uint32(unsafe.Sizeof(ti)))
+		if err != nil {
+			if errno, ok := err.(syscall.Errno); ok && errno == windows.ERROR_INVALID_PARAMETER {
+				// It appears calling GetFileInformationByHandleEx with
+				// FILE_ATTRIBUTE_TAG_INFO fails on FAT file system with
+				// ERROR_INVALID_PARAMETER. Clear ti.ReparseTag in that
+				// instance to indicate no symlinks are possible.
+				ti.ReparseTag = 0
+			} else {
+				return nil, &PathError{"GetFileInformationByHandleEx", path, err}
+			}
+		}
+	} else {
+		serverp, err := syscall.UTF16PtrFromString(netname.Server)
+		if err != nil {
+			return nil, err
+		}
+		_, _, err = syscall.Syscall6(syscall.GetProc("_GetFileInformationByHandle"), 4, uintptr(unsafe.Pointer(serverp)), uintptr(h), uintptr(unsafe.Pointer(&d)), uintptr(unsafe.Pointer(&ti.ReparseTag)), 0, 0)
 
+	}
 	return &fileStat{
 		name:           basename(path),
 		FileAttributes: d.FileAttributes,

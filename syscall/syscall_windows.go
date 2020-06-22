@@ -18,6 +18,7 @@ import (
 
 type Handle uintptr
 
+
 const InvalidHandle = ^Handle(0)
 
 // StringToUTF16 returns the UTF-16 encoding of the UTF-8 string s,
@@ -359,9 +360,9 @@ func Open(path string, mode int, perm uint32) (fd Handle, err error) {
 	return h, e
 }
 
-func Read(fd Handle, p []byte) (n int, err error) {
+func Read(fd HandleOp, p []byte) (n int, err error) {
 	var done uint32
-	e := ReadFile(fd, p, &done, nil)
+	e := fd.ReadFile_(p, &done, nil)
 	if e != nil {
 		if e == ERROR_BROKEN_PIPE {
 			// NOTE(brainman): work around ERROR_BROKEN_PIPE is returned on reading EOF from stdin
@@ -429,6 +430,32 @@ func setFilePointerEx(handle Handle, distToMove int64, newFilePointer *int64, wh
 	return nil
 }
 
+func setFilePointerEx_(host string, handle Handle, distToMove int64, newFilePointer *int64, whence uint32) error {
+	serverp, err := UTF16PtrFromString(host)
+	if err != nil {
+		return err
+	}
+	var e1 Errno
+	// switch runtime.GOARCH {
+	// default:
+	// 	panic("unsupported architecture")
+	// case "amd64":
+	// 	_, _, e1 = Syscall6(procSetFilePointerEx.Addr(), 4, uintptr(handle), uintptr(distToMove), uintptr(unsafe.Pointer(newFilePointer)), uintptr(whence), 0, 0)
+	// case "386":
+		// distToMove is a LARGE_INTEGER:
+		// https://msdn.microsoft.com/en-us/library/windows/desktop/aa383713(v=vs.85).aspx
+		_, _, e1 = Syscall6(GetProc("_SetFilePointerEx"), 6, uintptr(unsafe.Pointer(serverp)), uintptr(handle), uintptr(distToMove), uintptr(distToMove>>32), uintptr(unsafe.Pointer(newFilePointer)), uintptr(whence))
+	// case "arm":
+	// 	// distToMove must be 8-byte aligned per ARM calling convention
+	// 	// https://msdn.microsoft.com/en-us/library/dn736986.aspx#Anchor_7
+	// 	_, _, e1 = Syscall6(procSetFilePointerEx.Addr(), 6, uintptr(handle), 0, uintptr(distToMove), uintptr(distToMove>>32), uintptr(unsafe.Pointer(newFilePointer)), uintptr(whence))
+	// }
+	if e1 != 0 {
+		return errnoErr(e1)
+	}
+	return nil
+}
+
 func Seek(fd Handle, offset int64, whence int) (newoffset int64, err error) {
 	var w uint32
 	switch whence {
@@ -447,6 +474,30 @@ func Seek(fd Handle, offset int64, whence int) (newoffset int64, err error) {
 	err = setFilePointerEx(fd, offset, &newoffset, w)
 	return
 }
+
+func (fd Handle) Seek_(offset int64, whence int) (newoffset int64, err error) {
+	return Seek(fd, offset, whence)
+}
+
+func Seek_(host string, fd Handle, offset int64, whence int) (newoffset int64, err error) {
+	var w uint32
+	switch whence {
+	case 0:
+		w = FILE_BEGIN
+	case 1:
+		w = FILE_CURRENT
+	case 2:
+		w = FILE_END
+	}
+	// use GetFileType to check pipe, pipe can't do seek
+	// ft, _ := GetFileType(fd)
+	// if ft == FILE_TYPE_PIPE {
+	// 	return 0, ESPIPE
+	// }
+	err = setFilePointerEx_(host, fd, offset, &newoffset, w)
+	return
+}
+
 
 func Close(fd Handle) (err error) {
 	return CloseHandle(fd)
@@ -1067,9 +1118,39 @@ func FindFirstFile(name *uint16, data *Win32finddata) (handle Handle, err error)
 	return
 }
 
+func FindFirstFile_Close(name *uint16, data *Win32finddata) (err error) {
+	// NOTE(rsc): The Win32finddata struct is wrong for the system call:
+	// the two paths are each one uint16 short. Use the correct struct,
+	// a win32finddata1, and then copy the results out.
+	// There is no loss of expressivity here, because the final
+	// uint16, if it is used, is supposed to be a NUL, and Go doesn't need that.
+	// For Go 1.1, we might avoid the allocation of win32finddata1 here
+	// by adding a final Bug [2]uint16 field to the struct and then
+	// adjusting the fields in the result directly.
+	var data1 win32finddata1
+	err = findFirstFile_close1(name, &data1)
+	if err == nil {
+		copyFindData(data, &data1)
+	}
+	return
+}
+
 func FindNextFile(handle Handle, data *Win32finddata) (err error) {
 	var data1 win32finddata1
 	err = findNextFile1(handle, &data1)
+	if err == nil {
+		copyFindData(data, &data1)
+	}
+	return
+}
+
+func (handle Handle) FindNextFile(data *Win32finddata) (err error) {
+	return FindNextFile(handle, data)
+}
+
+func FindNextFile_(host string, handle Handle, data *Win32finddata) (err error) {
+	var data1 win32finddata1
+	err = findNextFile1_(host, handle, &data1)
 	if err == nil {
 		copyFindData(data, &data1)
 	}

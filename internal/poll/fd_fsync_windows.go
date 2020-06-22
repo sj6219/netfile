@@ -12,5 +12,5 @@ func (fd *FD) Fsync() error {
 		return err
 	}
 	defer fd.decref()
-	return syscall.Fsync(fd.Sysfd)
+	return syscall.Fsync(fd.Sysfd.GetDebugHandle())
 }

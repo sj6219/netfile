@@ -34,7 +34,7 @@ func sendFile(fd *netFD, r io.Reader) (written int64, err error, handled bool) {
 		return 0, nil, false
 	}
 
-	written, err = poll.SendFile(&fd.pfd, syscall.Handle(f.Fd()), n)
+	written, err = poll.SendFile(&fd.pfd, syscall.HandleOp(f.FdOp()), n)
 	if err != nil {
 		err = wrapSyscallError("transmitfile", err)
 	}

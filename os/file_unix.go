@@ -106,6 +106,7 @@ const (
 // (as passed in the kind parameter) it tries to add the file to
 // the runtime poller.
 func newFile(fd uintptr, name string, kind newFileKind) *File {
+	DebugDecompose(name)
 	fdi := int(fd)
 	if fdi < 0 {
 		return nil

@@ -12,7 +12,7 @@ func (fd *FD) Setsockopt(level, optname int32, optval *byte, optlen int32) error
 		return err
 	}
 	defer fd.decref()
-	return syscall.Setsockopt(fd.Sysfd, level, optname, optval, optlen)
+	return syscall.Setsockopt(fd.Sysfd.GetDebugHandle(), level, optname, optval, optlen)
 }
 
 // WSAIoctl wraps the WSAIoctl network call.
@@ -21,5 +21,5 @@ func (fd *FD) WSAIoctl(iocc uint32, inbuf *byte, cbif uint32, outbuf *byte, cbob
 		return err
 	}
 	defer fd.decref()
-	return syscall.WSAIoctl(fd.Sysfd, iocc, inbuf, cbif, outbuf, cbob, cbbr, overlapped, completionRoutine)
+	return syscall.WSAIoctl(fd.Sysfd.GetDebugHandle(), iocc, inbuf, cbif, outbuf, cbob, cbbr, overlapped, completionRoutine)
 }
