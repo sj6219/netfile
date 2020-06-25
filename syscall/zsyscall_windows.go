@@ -425,7 +425,7 @@ func findFirstFile_close1(name *uint16, data *win32finddata1) (err error) {
 				err = EINVAL
 			}
 		}
-		CloseHandle(handle)
+		FindClose(handle)
 	} else {
 		r0, _, e1 = Syscall(GetProc("_FindFirstFileW_Close"), 2, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(data)), 0)
 		if r0 == 0 {
