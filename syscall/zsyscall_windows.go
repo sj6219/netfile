@@ -333,6 +333,27 @@ func (handle Handle) ReadFile_(buf []byte, done *uint32, overlapped *Overlapped)
 	return ReadFile(handle, buf, done, overlapped)
 }
 
+func ReadFile_(host string, handle Handle, buf []byte, done *uint32, overlapped *Overlapped) (err error) {
+	serverp, err := UTF16PtrFromString(host)
+	if err != nil {
+		return err
+	}
+
+	var _p0 *byte
+	if len(buf) > 0 {
+		_p0 = &buf[0]
+	}
+	r1, _, e1 := Syscall6(GetProc("_ReadFile"), 6, uintptr(unsafe.Pointer(serverp)), uintptr(handle), uintptr(unsafe.Pointer(_p0)), uintptr(len(buf)), uintptr(unsafe.Pointer(done)), uintptr(unsafe.Pointer(overlapped)))
+	if r1 == 0 {
+		if e1 != 0 {
+			err = errnoErr(e1)
+		} else {
+			err = EINVAL
+		}
+	}
+	return
+}
+
 func WriteFile(handle Handle, buf []byte, done *uint32, overlapped *Overlapped) (err error) {
 	var _p0 *byte
 	if len(buf) > 0 {

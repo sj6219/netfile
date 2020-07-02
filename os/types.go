@@ -47,11 +47,6 @@ func (f *File) GetFileType() (n uint32, err error) {
 	return
 }
 
-func (file *File) ReadFile_(buf []byte, done *uint32, overlapped *syscall.Overlapped) (err error) {
-	syscall.Debug()
-	return syscall.ReadFile(file.GetHandle(), buf, done, overlapped)
-}
-
 func (file *File) CloseHandle_() (err error) {
 	var serverp *uint16
 	netname := syscall.Decompose(file.name)
@@ -96,6 +91,11 @@ func (file *File) FindNextFile(data *syscall.Win32finddata) (err error) {
 func (file *File) 	Seek_(offset int64, whence int) (newoffset int64, err error) {
 	netname := syscall.Decompose(file.name)
 	return syscall.Seek_(netname.Server, file.GetHandle(), offset, whence)
+}
+
+func (file *File) ReadFile_(buf []byte, done *uint32, overlapped *syscall.Overlapped) (err error) {
+	netname := syscall.Decompose(file.name)
+	return syscall.ReadFile_(netname.Server, file.GetHandle(), buf, done, overlapped)
 }
 
 func (file *File) 	TransmitFile_(s syscall.Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *syscall.Overlapped, transmitFileBuf *syscall.TransmitFileBuffers, flags uint32) (err error) {

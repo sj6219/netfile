@@ -20,11 +20,11 @@ type HandleOp interface {
 	GetHandle() Handle
 	GetDebugHandle() Handle
 	GetFileType() (uint32, error)
-	ReadFile_(buf []byte, done *uint32, overlapped *Overlapped) (err error)
 	CloseHandle_() (err error)
 	FindClose_() (err error)
 	FindNextFile(data *Win32finddata) (err error)
 	Seek_(offset int64, whence int) (newoffset int64, err error)
+	ReadFile_(buf []byte, done *uint32, overlapped *Overlapped) (err error)
 	TransmitFile_(s Handle, bytesToWrite uint32, bytsPerSend uint32, overlapped *Overlapped, transmitFileBuf *TransmitFileBuffers, flags uint32) (err error)
 	CancelIoEx_(o *Overlapped) (err error)
 }
